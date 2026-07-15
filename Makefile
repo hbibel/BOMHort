@@ -1,5 +1,6 @@
 .PHONY: help dev dev-up dev-down dev-logs dev-reset
 .PHONY: ch-shell ch-migrate
+.PHONY: integration-test-ch-setup integration-test
 .PHONY: backend-build backend-test backend-vet
 .PHONY: ui-build ui-dev
 .PHONY: ingest worker api
@@ -12,6 +13,8 @@ SHELL := /bin/bash
 REGISTRY ?= ghcr.io
 REPO     ?= seebom-labs/seebom
 TAG      ?= dev
+
+CH_DB_NAME ?= seebom
 
 # ─── Help ────────────────────────────────────────────────────────────────────
 help: ## Show this help
@@ -38,7 +41,7 @@ migrate: ## Run all pending database migrations
 	@echo "⏳ Running migrations..."
 	@for f in db/migrations/*.sql; do \
 		echo "  → $$f"; \
-		docker compose exec -T clickhouse clickhouse-client --database=seebom --multiquery < "$$f" 2>/dev/null || true; \
+		docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" --multiquery < "$$f" 2>/dev/null || true; \
 	done
 	@echo "✅ Migrations complete."
 
@@ -54,20 +57,20 @@ re-scan: ## Reset all data + queue, then re-ingest (e.g. after enabling OSV)
 	@echo "⏳ Running pending migrations..."
 	@for f in db/migrations/*.sql; do \
 		echo "  → $$f"; \
-		docker compose exec -T clickhouse clickhouse-client --database=seebom --multiquery < "$$f" 2>/dev/null || true; \
+		docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" --multiquery < "$$f" 2>/dev/null || true; \
 	done
 	@echo "🗑️  Clearing all data tables and queue..."
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "TRUNCATE TABLE ingestion_queue"
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "TRUNCATE TABLE vulnerabilities"
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "TRUNCATE TABLE license_compliance"
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "TRUNCATE TABLE sbom_packages"
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "TRUNCATE TABLE sboms"
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "TRUNCATE TABLE vex_statements" 2>/dev/null || true
 	@echo "♻️  Rebuilding services with latest code..."
 	@docker compose up --build -d api-gateway parsing-worker
@@ -87,25 +90,37 @@ dev-status: ## Show status of all containers + ingestion progress
 	@docker compose ps
 	@echo ""
 	@echo "=== Ingestion Progress ==="
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "SELECT latest_status AS status, count() AS cnt FROM (SELECT argMax(status, created_at) AS latest_status FROM ingestion_queue GROUP BY job_id) GROUP BY latest_status ORDER BY latest_status" \
 		--format=PrettyCompact 2>/dev/null || echo "(ClickHouse not ready)"
 	@echo ""
 	@echo "=== Data Summary ==="
-	@docker compose exec -T clickhouse clickhouse-client --database=seebom \
+	@docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" \
 		--query "SELECT 'sboms' AS tbl, count() AS cnt FROM sboms FINAL UNION ALL SELECT 'packages', count() FROM sbom_packages FINAL UNION ALL SELECT 'vulns', count() FROM vulnerabilities FINAL UNION ALL SELECT 'licenses', count() FROM license_compliance FINAL" \
 		--format=PrettyCompact 2>/dev/null || echo "(ClickHouse not ready)"
 
 # ─── ClickHouse ──────────────────────────────────────────────────────────────
 ch-shell: ## Open a ClickHouse client shell
-	docker compose exec clickhouse clickhouse-client --database=seebom
+	docker compose exec clickhouse clickhouse-client --database="$(CH_DB_NAME)"
 
 ch-migrate: ## Manually run all migrations against running ClickHouse
 	@for f in db/migrations/*.sql; do \
 		echo "⏳ Running $$f ..."; \
-		docker compose exec -T clickhouse clickhouse-client --database=seebom --multiquery < "$$f"; \
+		docker compose exec -T clickhouse clickhouse-client --database="$(CH_DB_NAME)" --multiquery < "$$f"; \
 	done
 	@echo "✅ All migrations applied."
+
+# ─── Integration Tests ────────────────────────────────────────────────────────
+integration-test-ch-setup: ch-only ## Create seebom_test database and apply all migrations
+	@echo "Creating seebom_test database..."
+	@docker compose exec -T clickhouse clickhouse-client --query "CREATE DATABASE IF NOT EXISTS seebom_test"
+	$(MAKE) ch-migrate CH_DB_NAME=seebom_test
+
+integration-test: integration-test-ch-setup ## Run integration tests against seebom_test database
+	@echo "Running integration tests..."
+	@cd backend && CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_DATABASE=seebom_test \
+		go test -v -tags=integration -count=1 ./internal/clickhouse/...
+	@echo "✅ Integration tests passed."
 
 # ─── Local dev (without Docker for backend) ──────────────────────────────────
 # Start only ClickHouse, then run Go services locally.
@@ -197,7 +212,7 @@ kind-reingest: ## Re-ingest all SBOMs in Kind (no re-download, truncates data + 
 	@echo "🗑️  Truncating data tables..."
 	@source local/secrets.env 2>/dev/null; \
 	kubectl exec -n seebom chi-seebom-clickhouse-seebom-cluster-0-0-0 -c clickhouse -- \
-		clickhouse-client --database=seebom --password="$${CLICKHOUSE_PASSWORD:-seebom}" --multiquery \
+		clickhouse-client --database="$(CH_DB_NAME)" --password="$${CLICKHOUSE_PASSWORD:-seebom}" --multiquery \
 		--query "TRUNCATE TABLE ingestion_queue; TRUNCATE TABLE license_compliance; TRUNCATE TABLE vulnerabilities; TRUNCATE TABLE sbom_packages; TRUNCATE TABLE sboms; TRUNCATE TABLE vex_statements;"
 	@echo "♻️  Triggering ingestion watcher..."
 	@kubectl create job --from=cronjob/seebom-ingestion-watcher seebom-reingest-$$(date +%s) -n seebom
