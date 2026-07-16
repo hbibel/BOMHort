@@ -1,16 +1,77 @@
+//go:build integration
+
 package clickhouse
 
-// This file contains integration test notes for the ClickHouse client.
-//
-// Running integration tests requires a running ClickHouse instance.
-// Use docker compose to start one:
-//
-//   docker compose up -d clickhouse
-//
-// Then run the tests:
-//
-//   CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_DATABASE=seebom \
-//     go test -v -tags=integration ./internal/clickhouse/
-//
-// Integration tests are tagged with //go:build integration
-// and are NOT run during normal `go test ./...`
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/seebom-labs/seebom/backend/internal/config"
+)
+
+var (
+	testClient          *Client
+	testClientSetupErrs []string
+)
+
+func TestMain(m *testing.M) {
+	host := os.Getenv("CLICKHOUSE_HOST")
+	if host == "" {
+		testClientSetupErrs = append(testClientSetupErrs, "Environment variable CLICKHOUSE_HOST must be set")
+	}
+
+	var port int
+	var err error
+	p := os.Getenv("CLICKHOUSE_PORT")
+	if host == "" {
+		testClientSetupErrs = append(testClientSetupErrs, "Environment variable CLICKHOUSE_DATABASE must be set")
+	}
+	if port, err = strconv.Atoi(p); err != nil {
+		testClientSetupErrs = append(testClientSetupErrs, fmt.Sprintf("Value of CLICKHOUSE_PORT '%s' is not a valid port: %v", p, err))
+	}
+
+	database := os.Getenv("CLICKHOUSE_DATABASE")
+	if host == "" {
+		testClientSetupErrs = append(testClientSetupErrs, "Environment variable CLICKHOUSE_DATABASE must be set")
+	}
+
+	user := os.Getenv("CLICKHOUSE_USER")
+	if user == "" {
+		user = "default"
+	}
+
+	password := os.Getenv("CLICKHOUSE_PASSWORD")
+
+	testCfg := &config.Config{
+		ClickHouseHost:     host,
+		ClickHousePort:     port,
+		ClickHouseDatabase: database,
+		ClickHouseUser:     user,
+		ClickHousePassword: password,
+	}
+
+	testClient, err = NewClient(testCfg)
+	if err != nil {
+		testClientSetupErrs = append(testClientSetupErrs, fmt.Sprintf("ClickHouse not available: %v", err))
+	}
+
+	code := m.Run()
+
+	if testClient != nil {
+		_ = testClient.Close()
+	}
+
+	os.Exit(code)
+}
+
+func requireClientSetup(t *testing.T) {
+	t.Helper()
+
+	if len(testClientSetupErrs) > 0 {
+		msg := strings.Join(testClientSetupErrs, "\n")
+		t.Fatalf("%s", msg)
+	}
+}
