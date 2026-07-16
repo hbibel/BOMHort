@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/seebom-labs/seebom/backend/pkg/models"
 )
 
@@ -140,4 +141,53 @@ func (c *Client) FailJob(ctx context.Context, job models.IngestionJob, errMsg st
 		`INSERT INTO ingestion_queue (created_at, job_id, source_file, sha256_hash, status, job_type, claimed_by, claimed_at, finished_at, error_message, cluster)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		now, job.JobID, job.SourceFile, job.SHA256Hash, models.JobStatusFailed, job.JobType, job.ClaimedBy, job.ClaimedAt, &now, errMsg, job.Cluster)
+}
+
+// InsertJob inserts a single job into the queue.
+func (c *Client) InsertJob(ctx context.Context, job models.IngestionJob) error {
+	ctx = clickhouse.Context(ctx, clickhouse.WithAsync(true))
+
+	jobType := job.JobType
+	if jobType == "" {
+		jobType = models.JobTypeSBOM
+	}
+
+	return c.Conn.Exec(ctx,
+		`INSERT INTO ingestion_queue (
+			created_at,
+			job_id,
+			source_file,
+			sha256_hash,
+			status,
+			job_type,
+			claimed_by,
+			claimed_at,
+			finished_at,
+			error_message,
+			cluster
+		)
+		VALUES (?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?
+		)`,
+		job.CreatedAt,
+		job.JobID,
+		job.SourceFile,
+		job.SHA256Hash,
+		models.JobStatusPending,
+		jobType,
+		"",
+		(*time.Time)(nil),
+		(*time.Time)(nil),
+		"",
+		job.Cluster,
+	)
 }
