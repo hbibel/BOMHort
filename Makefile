@@ -1,6 +1,6 @@
 .PHONY: help dev dev-up dev-down dev-logs dev-reset
 .PHONY: ch-shell ch-migrate
-.PHONY: integration-test-ch-setup integration-test
+.PHONY: integration-test
 .PHONY: backend-build backend-test backend-vet
 .PHONY: ui-build ui-dev
 .PHONY: ingest worker api
@@ -111,16 +111,10 @@ ch-migrate: ## Manually run all migrations against running ClickHouse
 	@echo "✅ All migrations applied."
 
 # ─── Integration Tests ────────────────────────────────────────────────────────
-integration-test-ch-setup: ch-only ## Create seebom_test database and apply all migrations
-	@echo "Creating seebom_test database..."
-	@docker compose exec -T clickhouse clickhouse-client --query "CREATE DATABASE IF NOT EXISTS seebom_test"
-	$(MAKE) ch-migrate CH_DB_NAME=seebom_test
-
-integration-test: integration-test-ch-setup ## Run integration tests against seebom_test database
-	@echo "Running integration tests..."
-	@cd backend && CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=9000 CLICKHOUSE_DATABASE=seebom_test \
-		go test -v -tags=integration -count=1 ./internal/clickhouse/...
-	@echo "✅ Integration tests passed."
+integration-test: ## Run integration tests
+	@echo "Running integration tests"
+	@cd backend && go test -v -tags=integration -count=1 ./internal/clickhouse/...
+	@echo "✅ Integration tests complete."
 
 # ─── Local dev (without Docker for backend) ──────────────────────────────────
 # Start only ClickHouse, then run Go services locally.

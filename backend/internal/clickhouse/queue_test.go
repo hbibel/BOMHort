@@ -19,19 +19,8 @@ const (
 	hashC = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
 
-func truncateQueue(t *testing.T) {
-	t.Helper()
-
-	err := testClient.Conn.Exec(context.Background(), "TRUNCATE TABLE ingestion_queue")
-	if err != nil {
-		t.Fatalf("failed to truncate queue: %v", err)
-	}
-}
-
 func TestEnqueueJobs_Batch(t *testing.T) {
 	requireClientSetup(t)
-	truncateQueue(t)
-	t.Cleanup(func() { truncateQueue(t) })
 
 	ctx := context.Background()
 
@@ -94,8 +83,6 @@ func TestEnqueueJobs_Batch(t *testing.T) {
 
 func TestEnqueueJobs_DefaultJobType(t *testing.T) {
 	requireClientSetup(t)
-	truncateQueue(t)
-	t.Cleanup(func() { truncateQueue(t) })
 
 	ctx := context.Background()
 
@@ -122,8 +109,6 @@ func TestEnqueueJobs_DefaultJobType(t *testing.T) {
 
 func TestInsertJob_InsertsRow(t *testing.T) {
 	requireClientSetup(t)
-	truncateQueue(t)
-	t.Cleanup(func() { truncateQueue(t) })
 
 	ctx := context.Background()
 
@@ -155,8 +140,6 @@ func TestInsertJob_InsertsRow(t *testing.T) {
 
 func TestClaimJobs_ClaimsAndMarksProcessing(t *testing.T) {
 	requireClientSetup(t)
-	truncateQueue(t)
-	t.Cleanup(func() { truncateQueue(t) })
 
 	ctx := context.Background()
 
@@ -206,8 +189,6 @@ func TestClaimJobs_ClaimsAndMarksProcessing(t *testing.T) {
 
 func TestClaimJobs_NoDoubleClaim(t *testing.T) {
 	requireClientSetup(t)
-	truncateQueue(t)
-	t.Cleanup(func() { truncateQueue(t) })
 
 	ctx := context.Background()
 
@@ -239,8 +220,6 @@ func TestClaimJobs_NoDoubleClaim(t *testing.T) {
 
 func TestClaimJobs_RespectsLimit(t *testing.T) {
 	requireClientSetup(t)
-	truncateQueue(t)
-	t.Cleanup(func() { truncateQueue(t) })
 
 	ctx := context.Background()
 
